@@ -246,25 +246,43 @@ async function sendGame(ctx, game) {
 // ========================
 
 async function publishGame(game) {
-  await bot.telegram.sendMessage(
-    PUBLIC_CHANNEL,
+  const text =
     `🎮 ${game.name}\n\n` +
-      `${game.description || 'Новая игра в GameVault-Mobile.'}\n\n` +
-      `📂 Категория: ${game.category || 'Другое'}\n\n` +
-      'Нажми кнопку ниже, чтобы получить игру.',
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '🎮 Скачать игру',
-              url: `https://t.me/GameVaultMobileBot?start=${game.id}`
-            }
-          ]
+    `${game.description || 'Новая игра в GameVault-Mobile.'}\n\n` +
+    `📂 Категория: ${game.category || 'Другое'}\n\n` +
+    'Нажми кнопку ниже, чтобы получить игру.';
+
+  const options = {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: '🎮 Скачать игру',
+            url: `https://t.me/GameVaultMobileBot?start=${game.id}`
+          }
         ]
-      }
+      ]
     }
-  );
+  };
+
+  // Если есть обложка — публикуем её вместе с текстом
+  if (game.cover_file_id) {
+    await bot.telegram.sendPhoto(
+      PUBLIC_CHANNEL,
+      game.cover_file_id,
+      {
+        caption: text,
+        ...options
+      }
+    );
+  } else {
+    // Старые игры без обложки продолжают публиковаться как раньше
+    await bot.telegram.sendMessage(
+      PUBLIC_CHANNEL,
+      text,
+      options
+    );
+  }
 }
 
 // ========================
@@ -345,12 +363,37 @@ bot.on('text', async (ctx) => {
 
   if (session.step === 'category') {
     session.category = ctx.message.text.trim();
-    session.step = 'file';
+    session.step = 'cover';
 
     return ctx.reply(
-      '📦 Теперь отправь APK-файл игры как документ.'
+      '🖼 Теперь отправь обложку игры как фото.'
     );
   }
+});
+
+// ========================
+// ОБЛОЖКА ИГРЫ
+// ========================
+
+bot.on('photo', async (ctx) => {
+  if (!isAdmin(ctx)) return;
+
+  const session = addGameSessions.get(ctx.from.id);
+
+  if (!session || session.step !== 'cover') return;
+
+  const photos = ctx.message.photo;
+
+  // Берём самое большое доступное изображение
+  const cover = photos[photos.length - 1];
+
+  session.cover_file_id = cover.file_id;
+  session.step = 'file';
+
+  await ctx.reply(
+    '✅ Обложка получена!\n\n' +
+      '📦 Теперь отправь APK-файл игры как документ.'
+  );
 });
 
 // ========================
@@ -381,6 +424,7 @@ bot.on('document', async (ctx) => {
             name: session.name,
             description: session.description,
             category: session.category,
+            cover_file_id: session.cover_file_id,
             file_id: document.file_id
           });
 
@@ -397,6 +441,7 @@ bot.on('document', async (ctx) => {
           name: session.name,
           description: session.description,
           category: session.category,
+          cover_file_id: session.cover_file_id,
           file_id: document.file_id
         };
 
@@ -416,7 +461,8 @@ bot.on('document', async (ctx) => {
           '✅ Игра успешно добавлена!\n\n' +
             `🎮 ${session.name}\n` +
             `🆔 ${gameId}\n` +
-            `📂 ${session.category}\n\n` +
+            `📂 ${session.category}\n` +
+            '🖼 Обложка сохранена\n\n' +
             'Игра сохранена в каталоге GameVault-Mobile.\n' +
             '📢 Пост автоматически опубликован в канале.'
         );
