@@ -263,6 +263,9 @@ bot.on('document', async (ctx) => {
 // КОМАНДЫ
 // ========================
 bot.command('addgame', async (ctx) => {
+  addGameSessions.set(ctx.from.id, {
+    step: 'name'
+  });
   if (!isAdmin(ctx)) {
     return ctx.reply('⛔ У тебя нет доступа к этой команде.');
   }
