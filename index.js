@@ -12,14 +12,21 @@ const app = express();
 
 const PUBLIC_CHANNEL = '@gamevaultmobile';
 
-// Каталог игр
-const games = {
-  game_001: {
-    name: 'Тестовая игра',
-    file_id:
-      'BQACAgIAAxkBAAMNarVXP1yAo87vbQOlCsCGF0BJ0OYAAlusAALufKhJppMrCQABiMpLPQQ'
+// Получение игры из Supabase
+async function getGame(gameId) {
+  const { data, error } = await supabase
+    .from('games')
+    .select('*')
+    .eq('id', gameId)
+    .single();
+
+  if (error) {
+    console.error('Supabase getGame error:', error);
+    return null;
   }
-};
+
+  return data;
+}
 
 // Пользователи, которые уже прошли проверку подписки
 const verifiedUsers = new Set();
@@ -45,8 +52,12 @@ app.listen(PORT, () => {
 bot.start(async (ctx) => {
   const gameId = ctx.startPayload;
 
-  if (gameId && games[gameId]) {
-    const game = games[gameId];
+  if (gameId) {
+    const game = await getGame(gameId);
+
+    if (!game) {
+      return ctx.reply('❌ Игра не найдена.');
+    }
 
     if (verifiedUsers.has(ctx.from.id)) {
       return sendGame(ctx, game);
@@ -82,9 +93,14 @@ bot.action('get_game', async (ctx) => {
   await ctx.answerCbQuery();
 
   const gameId = 'game_001';
+  const game = await getGame(gameId);
+
+  if (!game) {
+    return ctx.reply('❌ Игра не найдена.');
+  }
 
   if (verifiedUsers.has(ctx.from.id)) {
-    return sendGame(ctx, games[gameId]);
+    return sendGame(ctx, game);
   }
 
   return showSubscription(ctx, gameId);
@@ -123,7 +139,7 @@ bot.action(/^check:(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const gameId = ctx.match[1];
-  const game = games[gameId];
+  const game = await getGame(gameId);
 
   if (!game) {
     return ctx.reply('❌ Игра не найдена.');
@@ -182,7 +198,7 @@ async function sendGame(ctx, game) {
 
 bot.command('post', async (ctx) => {
   const gameId = 'game_001';
-  const game = games[gameId];
+  const game = await getGame(gameId);
 
   if (!game) {
     return ctx.reply('❌ Игра не найдена.');
