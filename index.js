@@ -16,6 +16,7 @@ const ADMIN_ID = 1047945172;
 function isAdmin(ctx) {
   return ctx.from && ctx.from.id === ADMIN_ID;
 }
+const addGameSessions = new Map();
 
 // Получение игры из Supabase
 async function getGame(gameId) {
@@ -301,7 +302,6 @@ bot.help((ctx) => {
 // ========================
 // ЗАПУСК
 // ========================
-const addGameSessions = new Map();
 
 bot.on('text', async (ctx) => {
   if (!isAdmin(ctx)) return;
