@@ -242,6 +242,32 @@ async function sendGame(ctx, game) {
 }
 
 // ========================
+// ПУБЛИКАЦИЯ ИГРЫ В КАНАЛЕ
+// ========================
+
+async function publishGame(game) {
+  await bot.telegram.sendMessage(
+    PUBLIC_CHANNEL,
+    `🎮 ${game.name}\n\n` +
+      `${game.description || 'Новая игра в GameVault-Mobile.'}\n\n` +
+      `📂 Категория: ${game.category || 'Другое'}\n\n` +
+      'Нажми кнопку ниже, чтобы получить игру.',
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '🎮 Скачать игру',
+              url: `https://t.me/GameVaultMobileBot?start=${game.id}`
+            }
+          ]
+        ]
+      }
+    }
+  );
+}
+
+// ========================
 // СОЗДАНИЕ ПОСТА
 // ========================
 
@@ -254,24 +280,7 @@ bot.command('post', async (ctx) => {
   }
 
   try {
-    await ctx.telegram.sendMessage(
-      PUBLIC_CHANNEL,
-      `🎮 ${game.name}\n\n` +
-        'Новая игра в GameVault-Mobile.\n\n' +
-        'Нажми кнопку ниже, чтобы получить игру.',
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: '🎮 Скачать игру',
-                url: `https://t.me/GameVaultMobileBot?start=${gameId}`
-              }
-            ]
-          ]
-        }
-      }
-    );
+    await publishGame(game);
 
     await ctx.reply('✅ Пост опубликован в канале.');
   } catch (error) {
@@ -310,7 +319,6 @@ bot.command('addgame', async (ctx) => {
 bot.on('text', async (ctx) => {
   if (!isAdmin(ctx)) return;
 
-  // Не обрабатываем команды как название игры
   if (ctx.message.text.startsWith('/')) return;
 
   const session = addGameSessions.get(ctx.from.id);
@@ -384,6 +392,24 @@ bot.on('document', async (ctx) => {
           );
         }
 
+        const game = {
+          id: gameId,
+          name: session.name,
+          description: session.description,
+          category: session.category,
+          file_id: document.file_id
+        };
+
+        // Автоматически публикуем игру в канале
+        try {
+          await publishGame(game);
+        } catch (publishError) {
+          console.error(
+            'Channel publish error:',
+            publishError
+          );
+        }
+
         addGameSessions.delete(ctx.from.id);
 
         return ctx.reply(
@@ -391,7 +417,8 @@ bot.on('document', async (ctx) => {
             `🎮 ${session.name}\n` +
             `🆔 ${gameId}\n` +
             `📂 ${session.category}\n\n` +
-            'Игра сохранена в каталоге GameVault-Mobile.'
+            'Игра сохранена в каталоге GameVault-Mobile.\n' +
+            '📢 Пост автоматически опубликован в канале.'
         );
       } catch (error) {
         console.error(error);
