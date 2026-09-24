@@ -298,6 +298,24 @@ bot.help((ctx) => {
 // ========================
 // ЗАПУСК
 // ========================
+const addGameSessions = new Map();
+
+bot.on('text', async (ctx) => {
+  if (!isAdmin(ctx)) return;
+
+  const session = addGameSessions.get(ctx.from.id);
+
+  if (!session) return;
+
+  if (session.step === 'name') {
+    session.name = ctx.message.text;
+    session.step = 'description';
+
+    return ctx.reply(
+      '📝 Теперь введи описание игры:'
+    );
+  }
+});
 
 bot.launch();
 
