@@ -16,9 +16,14 @@ const ADMIN_ID = 1047945172;
 function isAdmin(ctx) {
   return ctx.from && ctx.from.id === ADMIN_ID;
 }
+
+// Сессии добавления игр
 const addGameSessions = new Map();
 
-// Получение игры из Supabase
+// ========================
+// ПОЛУЧЕНИЕ ИГРЫ
+// ========================
+
 async function getGame(gameId) {
   const { data, error } = await supabase
     .from('games')
@@ -34,8 +39,46 @@ async function getGame(gameId) {
   return data;
 }
 
-// Пользователи, которые уже прошли проверку подписки
+// ========================
+// СОЗДАНИЕ ID НОВОЙ ИГРЫ
+// ========================
+
+async function getNextGameId() {
+  const { data, error } = await supabase
+    .from('games')
+    .select('id');
+
+  if (error) {
+    console.error('Supabase ID error:', error);
+    return null;
+  }
+
+  let maxNumber = 0;
+
+  for (const game of data || []) {
+    const match = String(game.id).match(/^game_(\d+)$/);
+
+    if (match) {
+      const number = Number(match[1]);
+
+      if (number > maxNumber) {
+        maxNumber = number;
+      }
+    }
+  }
+
+  return `game_${String(maxNumber + 1).padStart(3, '0')}`;
+}
+
+// ========================
+// ПРОВЕРЕННЫЕ ПОЛЬЗОВАТЕЛИ
+// ========================
+
 const verifiedUsers = new Set();
+
+// ========================
+// EXPRESS
+// ========================
 
 app.get('/', (req, res) => {
   res.send('GameVault-Mobile bot is running!');
@@ -199,7 +242,7 @@ async function sendGame(ctx, game) {
 }
 
 // ========================
-// СОЗДАНИЕ ПОСТА В КАНАЛЕ
+// СОЗДАНИЕ ПОСТА
 // ========================
 
 bot.command('post', async (ctx) => {
@@ -242,6 +285,132 @@ bot.command('post', async (ctx) => {
 });
 
 // ========================
+// ДОБАВЛЕНИЕ ИГРЫ
+// ========================
+
+bot.command('addgame', async (ctx) => {
+  if (!isAdmin(ctx)) {
+    return ctx.reply('⛔ У тебя нет доступа к этой команде.');
+  }
+
+  addGameSessions.set(ctx.from.id, {
+    step: 'name'
+  });
+
+  await ctx.reply(
+    '🎮 Добавление игры\n\n' +
+      'Введи название игры:'
+  );
+});
+
+// ========================
+// ТЕКСТ ДОБАВЛЕНИЯ ИГРЫ
+// ========================
+
+bot.on('text', async (ctx) => {
+  if (!isAdmin(ctx)) return;
+
+  // Не обрабатываем команды как название игры
+  if (ctx.message.text.startsWith('/')) return;
+
+  const session = addGameSessions.get(ctx.from.id);
+
+  if (!session) return;
+
+  if (session.step === 'name') {
+    session.name = ctx.message.text.trim();
+    session.step = 'description';
+
+    return ctx.reply(
+      '📝 Теперь введи описание игры:'
+    );
+  }
+
+  if (session.step === 'description') {
+    session.description = ctx.message.text.trim();
+    session.step = 'category';
+
+    return ctx.reply(
+      '📂 Теперь введи категорию игры:'
+    );
+  }
+
+  if (session.step === 'category') {
+    session.category = ctx.message.text.trim();
+    session.step = 'file';
+
+    return ctx.reply(
+      '📦 Теперь отправь APK-файл игры как документ.'
+    );
+  }
+});
+
+// ========================
+// APK / ДОКУМЕНТ
+// ========================
+
+bot.on('document', async (ctx) => {
+  const document = ctx.message.document;
+
+  // Если админ сейчас добавляет игру
+  if (isAdmin(ctx)) {
+    const session = addGameSessions.get(ctx.from.id);
+
+    if (session && session.step === 'file') {
+      try {
+        const gameId = await getNextGameId();
+
+        if (!gameId) {
+          return ctx.reply(
+            '❌ Не удалось создать ID игры.'
+          );
+        }
+
+        const { error } = await supabase
+          .from('games')
+          .insert({
+            id: gameId,
+            name: session.name,
+            description: session.description,
+            category: session.category,
+            file_id: document.file_id
+          });
+
+        if (error) {
+          console.error('Supabase insert error:', error);
+
+          return ctx.reply(
+            '❌ Не удалось сохранить игру в Supabase.'
+          );
+        }
+
+        addGameSessions.delete(ctx.from.id);
+
+        return ctx.reply(
+          '✅ Игра успешно добавлена!\n\n' +
+            `🎮 ${session.name}\n` +
+            `🆔 ${gameId}\n` +
+            `📂 ${session.category}\n\n` +
+            'Игра сохранена в каталоге GameVault-Mobile.'
+        );
+      } catch (error) {
+        console.error(error);
+
+        return ctx.reply(
+          '❌ Произошла ошибка при добавлении игры.'
+        );
+      }
+    }
+  }
+
+  // Обычная команда получения FILE_ID
+  await ctx.reply(
+    '📦 FILE_ID:\n\n' +
+      document.file_id
+  );
+});
+
+// ========================
 // FILE ID
 // ========================
 
@@ -251,31 +420,9 @@ bot.command('fileid', async (ctx) => {
   );
 });
 
-bot.on('document', async (ctx) => {
-  const document = ctx.message.document;
-
-  await ctx.reply(
-    '📦 FILE_ID:\n\n' +
-      document.file_id
-  );
-});
-
 // ========================
 // КОМАНДЫ
 // ========================
-bot.command('addgame', async (ctx) => {
-  addGameSessions.set(ctx.from.id, {
-    step: 'name'
-  });
-  if (!isAdmin(ctx)) {
-    return ctx.reply('⛔ У тебя нет доступа к этой команде.');
-  }
-
-  ctx.reply(
-    '🎮 Добавление игры\n\n' +
-    'Введи название игры:'
-  );
-});
 
 bot.command('games', (ctx) => {
   ctx.reply(
@@ -295,38 +442,14 @@ bot.help((ctx) => {
       '/start — запустить бота\n' +
       '/games — игры\n' +
       '/new — новинки\n' +
-      '/help — помощь'
+      '/help — помощь\n' +
+      '/addgame — добавить игру'
   );
 });
 
 // ========================
 // ЗАПУСК
 // ========================
-
-bot.on('text', async (ctx) => {
-  if (!isAdmin(ctx)) return;
-
-  const session = addGameSessions.get(ctx.from.id);
-
-  if (!session) return;
-
-  if (session.step === 'name') {
-    session.name = ctx.message.text;
-    session.step = 'description';
-
-    return ctx.reply(
-      '📝 Теперь введи описание игры:'
-    );
-  }
-if (session.step === 'description') {
-  session.description = ctx.message.text;
-  session.step = 'category';
-
-  return ctx.reply(
-    '📂 Теперь введи категорию игры:'
-  );
-}
-});
 
 bot.launch();
 
