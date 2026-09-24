@@ -262,6 +262,16 @@ bot.on('document', async (ctx) => {
 // ========================
 // КОМАНДЫ
 // ========================
+bot.command('addgame', async (ctx) => {
+  if (!isAdmin(ctx)) {
+    return ctx.reply('⛔ У тебя нет доступа к этой команде.');
+  }
+
+  ctx.reply(
+    '🎮 Добавление игры\n\n' +
+    'Введи название игры:'
+  );
+});
 
 bot.command('games', (ctx) => {
   ctx.reply(
