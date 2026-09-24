@@ -10,11 +10,12 @@ const PUBLIC_CHANNEL = '@gamevaultmobile';
 const games = {
   game_001: {
     name: 'Тестовая игра',
-    file_id: 'BQACAgIAAxkBAAMNarVXP1yAo87vbQOlCsCGF0BJ0OYAAlusAALufKhJppMrCQABiMpLPQQ'
+    file_id:
+      'BQACAgIAAxkBAAMNarVXP1yAo87vbQOlCsCGF0BJ0OYAAlusAALufKhJppMrCQABiMpLPQQ'
   }
 };
 
-// Пока храним прошедших проверку в памяти
+// Пользователи, которые уже прошли проверку подписки
 const verifiedUsers = new Set();
 
 app.get('/', (req, res) => {
@@ -38,7 +39,6 @@ app.listen(PORT, () => {
 bot.start(async (ctx) => {
   const gameId = ctx.startPayload;
 
-  // Пользователь пришёл по кнопке конкретной игры
   if (gameId && games[gameId]) {
     const game = games[gameId];
 
@@ -51,12 +51,17 @@ bot.start(async (ctx) => {
 
   await ctx.reply(
     '🎮 Добро пожаловать в GameVault-Mobile!\n\n' +
-    'Твоё хранилище мобильных игр.\n\n' +
-    'Игры из наших подборок можно получить через кнопки в канале.',
+      'Твоё хранилище мобильных игр.\n\n' +
+      'Игры из наших подборок можно получить через кнопки в канале.',
     {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '🎮 Получить тестовую игру', callback_data: 'get_game' }]
+          [
+            {
+              text: '🎮 Получить тестовую игру',
+              callback_data: 'get_game'
+            }
+          ]
         ]
       }
     }
@@ -64,7 +69,7 @@ bot.start(async (ctx) => {
 });
 
 // ========================
-// ТЕСТОВАЯ КНОПКА
+// ПОЛУЧИТЬ ИГРУ
 // ========================
 
 bot.action('get_game', async (ctx) => {
@@ -86,7 +91,7 @@ bot.action('get_game', async (ctx) => {
 async function showSubscription(ctx, gameId) {
   await ctx.reply(
     '📢 Чтобы скачать игру, сначала подпишись на наш Telegram-канал.\n\n' +
-    'После подписки нажми «Проверить подписку».',
+      'После подписки нажми «Проверить подписку».',
     {
       reply_markup: {
         inline_keyboard: [
@@ -133,7 +138,7 @@ bot.action(/^check:(.+)$/, async (ctx) => {
     if (!subscribed) {
       return ctx.reply(
         '❌ Ты ещё не подписан на канал.\n\n' +
-        'Подпишись и нажми «Проверить подписку».'
+          'Подпишись и нажми «Проверить подписку».'
       );
     }
 
@@ -142,13 +147,12 @@ bot.action(/^check:(.+)$/, async (ctx) => {
     await ctx.reply('✅ Подписка подтверждена!');
 
     await sendGame(ctx, game);
-
   } catch (error) {
     console.error(error);
 
     await ctx.reply(
       '⚠️ Не удалось проверить подписку.\n\n' +
-      'Попробуй ещё раз через несколько секунд.'
+        'Попробуй ещё раз через несколько секунд.'
     );
   }
 });
@@ -160,17 +164,57 @@ bot.action(/^check:(.+)$/, async (ctx) => {
 async function sendGame(ctx, game) {
   await ctx.reply(
     `🎮 ${game.name}\n\n` +
-    'Вот твоя игра 👇'
+      'Вот твоя игра 👇'
   );
 
-  await ctx.telegram.sendDocument(
-    ctx.chat.id,
-    game.file_id
-  );
+  await ctx.telegram.sendDocument(ctx.chat.id, game.file_id);
 }
 
 // ========================
-// ПОЛУЧЕНИЕ FILE_ID
+// СОЗДАНИЕ ПОСТА В КАНАЛЕ
+// ========================
+
+bot.command('post', async (ctx) => {
+  const gameId = 'game_001';
+  const game = games[gameId];
+
+  if (!game) {
+    return ctx.reply('❌ Игра не найдена.');
+  }
+
+  try {
+    await ctx.telegram.sendMessage(
+      PUBLIC_CHANNEL,
+      `🎮 ${game.name}\n\n` +
+        'Новая игра в GameVault-Mobile.\n\n' +
+        'Нажми кнопку ниже, чтобы получить игру.',
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '🎮 Скачать игру',
+                url: `https://t.me/GameVaultMobileBot?start=${gameId}`
+              }
+            ]
+          ]
+        }
+      }
+    );
+
+    await ctx.reply('✅ Пост опубликован в канале.');
+  } catch (error) {
+    console.error(error);
+
+    await ctx.reply(
+      '❌ Не удалось опубликовать пост.\n\n' +
+        'Проверь права бота в канале.'
+    );
+  }
+});
+
+// ========================
+// FILE ID
 // ========================
 
 bot.command('fileid', async (ctx) => {
@@ -184,7 +228,7 @@ bot.on('document', async (ctx) => {
 
   await ctx.reply(
     '📦 FILE_ID:\n\n' +
-    document.file_id
+      document.file_id
   );
 });
 
@@ -207,10 +251,10 @@ bot.command('new', (ctx) => {
 bot.help((ctx) => {
   ctx.reply(
     '🎮 GameVault-Mobile\n\n' +
-    '/start — запустить бота\n' +
-    '/games — игры\n' +
-    '/new — новинки\n' +
-    '/help — помощь'
+      '/start — запустить бота\n' +
+      '/games — игры\n' +
+      '/new — новинки\n' +
+      '/help — помощь'
   );
 });
 
