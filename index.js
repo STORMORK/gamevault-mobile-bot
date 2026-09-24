@@ -318,6 +318,14 @@ bot.on('text', async (ctx) => {
       '📝 Теперь введи описание игры:'
     );
   }
+if (session.step === 'description') {
+  session.description = ctx.message.text;
+  session.step = 'category';
+
+  return ctx.reply(
+    '📂 Теперь введи категорию игры:'
+  );
+}
 });
 
 bot.launch();
