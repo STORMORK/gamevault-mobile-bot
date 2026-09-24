@@ -1,5 +1,11 @@
 const { Telegraf } = require('telegraf');
 const express = require('express');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SECRET_KEY
+);
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const app = express();
