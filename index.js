@@ -11,6 +11,11 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const app = express();
 
 const PUBLIC_CHANNEL = '@gamevaultmobile';
+const ADMIN_ID = 1047945172;
+
+function isAdmin(ctx) {
+  return ctx.from && ctx.from.id === ADMIN_ID;
+}
 
 // Получение игры из Supabase
 async function getGame(gameId) {
