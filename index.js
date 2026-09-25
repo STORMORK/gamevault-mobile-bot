@@ -23,13 +23,43 @@ const WEBHOOK_URL =
   process.env.WEBHOOK_URL ||
   process.env.RENDER_EXTERNAL_URL;
 
+const WEBHOOK_SECRET =
+  process.env.TELEGRAM_WEBHOOK_SECRET;
+
 if (!WEBHOOK_URL) {
   throw new Error(
     'WEBHOOK_URL or RENDER_EXTERNAL_URL is required for webhook mode.'
   );
 }
 
-app.use(bot.webhookCallback(WEBHOOK_PATH));
+if (!WEBHOOK_SECRET) {
+  throw new Error(
+    'TELEGRAM_WEBHOOK_SECRET is required for webhook security.'
+  );
+}
+
+const webhookHandler =
+  bot.webhookCallback(WEBHOOK_PATH);
+
+app.use(
+  WEBHOOK_PATH,
+  (req, res, next) => {
+    const receivedSecret =
+      req.headers[
+        'x-telegram-bot-api-secret-token'
+      ];
+
+    if (receivedSecret !== WEBHOOK_SECRET) {
+      console.warn(
+        'Blocked unauthorized webhook request.'
+      );
+
+      return res.sendStatus(403);
+    }
+
+    return webhookHandler(req, res, next);
+  }
+);
 
 // ========================
 // ADMIN
@@ -589,14 +619,9 @@ const server = app.listen(
       `${WEBHOOK_URL}${WEBHOOK_PATH}`;
 
     try {
-      const webhookOptions = {};
-
-      if (
-        process.env.TELEGRAM_WEBHOOK_SECRET
-      ) {
-        webhookOptions.secret_token =
-          process.env.TELEGRAM_WEBHOOK_SECRET;
-      }
+      const webhookOptions = {
+        secret_token: WEBHOOK_SECRET
+      };
 
       await bot.telegram.setWebhook(
         webhookUrl,
@@ -612,6 +637,10 @@ const server = app.listen(
 
       console.log(
         `Telegram webhook set: ${webhookInfo.url}`
+      );
+
+      console.log(
+        'Telegram webhook secret protection: ENABLED'
       );
     } catch (error) {
       console.error(
