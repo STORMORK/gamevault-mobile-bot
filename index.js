@@ -13,10 +13,6 @@ const app = express();
 const PUBLIC_CHANNEL = '@gamevaultmobile';
 const ADMIN_ID = 1047945172;
 
-// ========================
-// WEBHOOK
-// ========================
-
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_PATH = '/telegram-webhook';
 
@@ -29,19 +25,25 @@ const WEBHOOK_SECRET =
 
 if (!WEBHOOK_URL) {
   throw new Error(
-    'WEBHOOK_URL or RENDER_EXTERNAL_URL is required for webhook mode.'
+    'WEBHOOK_URL or RENDER_EXTERNAL_URL is required.'
   );
 }
 
 if (!WEBHOOK_SECRET) {
   throw new Error(
-    'TELEGRAM_WEBHOOK_SECRET is required for webhook security.'
+    'TELEGRAM_WEBHOOK_SECRET is required.'
   );
 }
 
-// ========================
+// ========================================
+// EXPRESS
+// ========================================
+
+app.use(express.json());
+
+// ========================================
 // WEBHOOK SECURITY
-// ========================
+// ========================================
 
 app.use((req, res, next) => {
   if (req.path !== WEBHOOK_PATH) {
@@ -59,34 +61,58 @@ app.use((req, res, next) => {
     return res.sendStatus(403);
   }
 
+  console.log('Telegram webhook request received.');
+
   next();
 });
 
-// ========================
+// ========================================
 // TELEGRAM WEBHOOK
-// ========================
+// ========================================
 
 app.use(
+  WEBHOOK_PATH,
   bot.webhookCallback(WEBHOOK_PATH)
 );
 
-// ========================
+// ========================================
+// HEALTH
+// ========================================
+
+app.get('/', (req, res) => {
+  res.send('GameVault-Mobile bot is running!');
+});
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    bot: 'GameVault-Mobile'
+  });
+});
+
+// ========================================
 // ADMIN
-// ========================
+// ========================================
 
 function isAdmin(ctx) {
   return ctx.from && ctx.from.id === ADMIN_ID;
 }
 
-// ========================
-// СЕССИИ ДОБАВЛЕНИЯ ИГР
-// ========================
+// ========================================
+// VERIFIED USERS
+// ========================================
+
+const verifiedUsers = new Set();
+
+// ========================================
+// ADD GAME SESSIONS
+// ========================================
 
 const addGameSessions = new Map();
 
-// ========================
-// ПОЛУЧЕНИЕ ИГРЫ
-// ========================
+// ========================================
+// GET GAME
+// ========================================
 
 async function getGame(gameId) {
   const { data, error } = await supabase
@@ -96,16 +122,20 @@ async function getGame(gameId) {
     .single();
 
   if (error) {
-    console.error('Supabase getGame error:', error);
+    console.error(
+      'Supabase getGame error:',
+      error.message
+    );
+
     return null;
   }
 
   return data;
 }
 
-// ========================
-// СОЗДАНИЕ ID НОВОЙ ИГРЫ
-// ========================
+// ========================================
+// NEXT GAME ID
+// ========================================
 
 async function getNextGameId() {
   const { data, error } = await supabase
@@ -113,14 +143,20 @@ async function getNextGameId() {
     .select('id');
 
   if (error) {
-    console.error('Supabase ID error:', error);
+    console.error(
+      'Supabase ID error:',
+      error.message
+    );
+
     return null;
   }
 
   let maxNumber = 0;
 
   for (const game of data || []) {
-    const match = String(game.id).match(/^game_(\d+)$/);
+    const match = String(game.id).match(
+      /^game_(\d+)$/
+    );
 
     if (match) {
       const number = Number(match[1]);
@@ -134,93 +170,57 @@ async function getNextGameId() {
   return `game_${String(maxNumber + 1).padStart(3, '0')}`;
 }
 
-// ========================
-// ПРОВЕРЕННЫЕ ПОЛЬЗОВАТЕЛИ
-// ========================
+// ========================================
+// SEND GAME
+// ========================================
 
-const verifiedUsers = new Set();
-
-// ========================
-// EXPRESS
-// ========================
-
-app.get('/', (req, res) => {
-  res.send('GameVault-Mobile bot is running!');
-});
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-// ========================
-// START
-// ========================
-
-bot.start(async (ctx) => {
-  const gameId = ctx.startPayload;
-
-  if (gameId) {
-    const game = await getGame(gameId);
-
-    if (!game) {
-      return ctx.reply('❌ Игра не найдена.');
-    }
-
-    if (verifiedUsers.has(ctx.from.id)) {
-      return sendGame(ctx, game);
-    }
-
-    return showSubscription(ctx, gameId);
-  }
-
-  await ctx.reply(
-    '🎮 Добро пожаловать в GameVault-Mobile!\n\n' +
-      'Твоё хранилище мобильных игр.\n\n' +
-      'Игры из наших подборок можно получить через кнопки в канале.',
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '🎮 Получить тестовую игру',
-              callback_data: 'get_game'
-            }
-          ]
-        ]
-      }
-    }
-  );
-});
-
-// ========================
-// ПОЛУЧИТЬ ИГРУ
-// ========================
-
-bot.action('get_game', async (ctx) => {
-  await ctx.answerCbQuery();
-
-  const gameId = 'game_001';
-  const game = await getGame(gameId);
-
+async function sendGame(ctx, game) {
   if (!game) {
     return ctx.reply('❌ Игра не найдена.');
   }
 
-  if (verifiedUsers.has(ctx.from.id)) {
-    return sendGame(ctx, game);
+  if (!game.file_id) {
+    return ctx.reply(
+      '⚠️ Файл игры пока не загружен.'
+    );
   }
 
-  return showSubscription(ctx, gameId);
-});
+  try {
+    await ctx.reply(
+      `🎮 ${game.name || 'Игра'}\n\n` +
+      `${game.description || ''}\n\n` +
+      '📦 Файл игры отправляю...'
+    );
 
-// ========================
-// ПРОВЕРКА ПОДПИСКИ
-// ========================
+    await ctx.telegram.sendDocument(
+      ctx.from.id,
+      game.file_id,
+      {
+        caption:
+          `🎮 ${game.name || 'Игра'}\n\n` +
+          'Спасибо, что пользуешься GameVault-Mobile!'
+      }
+    );
+  } catch (error) {
+    console.error(
+      'sendGame error:',
+      error
+    );
+
+    await ctx.reply(
+      '❌ Не удалось отправить файл игры.'
+    );
+  }
+}
+
+// ========================================
+// SUBSCRIPTION
+// ========================================
 
 async function showSubscription(ctx, gameId) {
   await ctx.reply(
     '📢 Чтобы скачать игру, сначала подпишись на наш Telegram-канал.\n\n' +
-      'После подписки нажми «Проверить подписку».',
+    'После подписки нажми «Проверить подписку».',
     {
       reply_markup: {
         inline_keyboard: [
@@ -242,410 +242,272 @@ async function showSubscription(ctx, gameId) {
   );
 }
 
-bot.action(/^check:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
+// ========================================
+// START
+// ========================================
 
-  const gameId = ctx.match[1];
-  const game = await getGame(gameId);
+bot.start(async (ctx) => {
+  console.log(
+    `Received /start from ${ctx.from.id}`
+  );
 
-  if (!game) {
-    return ctx.reply('❌ Игра не найдена.');
-  }
+  const gameId = ctx.startPayload;
 
-  try {
-    const member = await ctx.telegram.getChatMember(
-      PUBLIC_CHANNEL,
-      ctx.from.id
-    );
+  if (gameId) {
+    const game = await getGame(gameId);
 
-    const subscribed = [
-      'creator',
-      'administrator',
-      'member'
-    ].includes(member.status);
-
-    if (!subscribed) {
+    if (!game) {
       return ctx.reply(
-        '❌ Ты ещё не подписан на канал.\n\n' +
-          'Подпишись и нажми «Проверить подписку».'
+        '❌ Игра не найдена.'
       );
     }
 
-    verifiedUsers.add(ctx.from.id);
-
-    await ctx.reply('✅ Подписка подтверждена!');
-
-    await sendGame(ctx, game);
-  } catch (error) {
-    console.error(error);
-
-    await ctx.reply(
-      '⚠️ Не удалось проверить подписку.\n\n' +
-        'Попробуй ещё раз через несколько секунд.'
-    );
-  }
-});
-
-// ========================
-// ОТПРАВКА ИГРЫ
-// ========================
-
-async function sendGame(ctx, game) {
-  await ctx.reply(
-    `🎮 ${game.name}\n\n` +
-      'Вот твоя игра 👇'
-  );
-
-  await ctx.telegram.sendDocument(
-    ctx.chat.id,
-    game.file_id
-  );
-}
-
-// ========================
-// ПУБЛИКАЦИЯ ИГРЫ В КАНАЛЕ
-// ========================
-
-async function publishGame(game) {
-  const text =
-    `🎮 ${game.name}\n\n` +
-    `${game.description || 'Новая игра в GameVault-Mobile.'}\n\n` +
-    `📂 Категория: ${game.category || 'Другое'}\n\n` +
-    'Нажми кнопку ниже, чтобы получить игру.';
-
-  const options = {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: '🎮 Скачать игру',
-            url: `https://t.me/GameVaultMobileBot?start=${game.id}`
-          }
-        ]
-      ]
+    if (verifiedUsers.has(ctx.from.id)) {
+      return sendGame(ctx, game);
     }
-  };
 
-  if (game.cover_file_id) {
-    await bot.telegram.sendPhoto(
-      PUBLIC_CHANNEL,
-      game.cover_file_id,
-      {
-        caption: text,
-        ...options
+    return showSubscription(
+      ctx,
+      gameId
+    );
+  }
+
+  await ctx.reply(
+    '🎮 Добро пожаловать в GameVault-Mobile!\n\n' +
+    'Твоё хранилище мобильных игр.\n\n' +
+    'Игры из наших подборок можно получить через кнопки в канале.',
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '🎮 Получить тестовую игру',
+              callback_data: 'get_game'
+            }
+          ]
+        ]
       }
-    );
-  } else {
-    await bot.telegram.sendMessage(
-      PUBLIC_CHANNEL,
-      text,
-      options
-    );
-  }
-}
-
-// ========================
-// СОЗДАНИЕ ПОСТА
-// ========================
-
-bot.command('post', async (ctx) => {
-  const gameId = 'game_001';
-  const game = await getGame(gameId);
-
-  if (!game) {
-    return ctx.reply('❌ Игра не найдена.');
-  }
-
-  try {
-    await publishGame(game);
-
-    await ctx.reply(
-      '✅ Пост опубликован в канале.'
-    );
-  } catch (error) {
-    console.error(error);
-
-    await ctx.reply(
-      '❌ Не удалось опубликовать пост.\n\n' +
-        'Проверь права бота в канале.'
-    );
-  }
-});
-
-// ========================
-// ДОБАВЛЕНИЕ ИГРЫ
-// ========================
-
-bot.command('addgame', async (ctx) => {
-  if (!isAdmin(ctx)) {
-    return ctx.reply(
-      '⛔ У тебя нет доступа к этой команде.'
-    );
-  }
-
-  addGameSessions.set(ctx.from.id, {
-    step: 'name'
-  });
-
-  await ctx.reply(
-    '🎮 Добавление игры\n\n' +
-      'Введи название игры:'
+    }
   );
 });
 
-// ========================
-// ТЕКСТ ДОБАВЛЕНИЯ ИГРЫ
-// ========================
+// ========================================
+// TEST GAME BUTTON
+// ========================================
 
-bot.on('text', async (ctx) => {
-  if (!isAdmin(ctx)) return;
+bot.action(
+  'get_game',
+  async (ctx) => {
+    await ctx.answerCbQuery();
 
-  if (ctx.message.text.startsWith('/')) return;
+    const gameId = 'game_001';
 
-  const session = addGameSessions.get(
-    ctx.from.id
-  );
+    const game = await getGame(gameId);
 
-  if (!session) return;
+    if (!game) {
+      return ctx.reply(
+        '❌ Тестовая игра не найдена.'
+      );
+    }
 
-  if (session.step === 'name') {
-    session.name =
-      ctx.message.text.trim();
+    if (verifiedUsers.has(ctx.from.id)) {
+      return sendGame(ctx, game);
+    }
 
-    session.step = 'description';
-
-    return ctx.reply(
-      '📝 Теперь введи описание игры:'
+    return showSubscription(
+      ctx,
+      gameId
     );
   }
+);
 
-  if (session.step === 'description') {
-    session.description =
-      ctx.message.text.trim();
+// ========================================
+// CHECK SUBSCRIPTION
+// ========================================
 
-    session.step = 'category';
+bot.action(
+  /^check:(.+)$/,
+  async (ctx) => {
+    await ctx.answerCbQuery();
 
-    return ctx.reply(
-      '📂 Теперь введи категорию игры:'
-    );
-  }
+    const gameId = ctx.match[1];
 
-  if (session.step === 'category') {
-    session.category =
-      ctx.message.text.trim();
+    const game = await getGame(gameId);
 
-    session.step = 'cover';
+    if (!game) {
+      return ctx.reply(
+        '❌ Игра не найдена.'
+      );
+    }
 
-    return ctx.reply(
-      '🖼 Теперь отправь обложку игры как фото.'
-    );
-  }
-});
-
-// ========================
-// ОБЛОЖКА ИГРЫ
-// ========================
-
-bot.on('photo', async (ctx) => {
-  if (!isAdmin(ctx)) return;
-
-  const session = addGameSessions.get(
-    ctx.from.id
-  );
-
-  if (
-    !session ||
-    session.step !== 'cover'
-  ) {
-    return;
-  }
-
-  const photos = ctx.message.photo;
-
-  const cover =
-    photos[photos.length - 1];
-
-  session.cover_file_id =
-    cover.file_id;
-
-  session.step = 'file';
-
-  await ctx.reply(
-    '✅ Обложка получена!\n\n' +
-      '📦 Теперь отправь APK-файл игры как документ.'
-  );
-});
-
-// ========================
-// APK / ДОКУМЕНТ
-// ========================
-
-bot.on('document', async (ctx) => {
-  const document =
-    ctx.message.document;
-
-  if (isAdmin(ctx)) {
-    const session =
-      addGameSessions.get(ctx.from.id);
-
-    if (
-      session &&
-      session.step === 'file'
-    ) {
-      try {
-        const gameId =
-          await getNextGameId();
-
-        if (!gameId) {
-          return ctx.reply(
-            '❌ Не удалось создать ID игры.'
-          );
-        }
-
-        const { error } =
-          await supabase
-            .from('games')
-            .insert({
-              id: gameId,
-              name: session.name,
-              description:
-                session.description,
-              category:
-                session.category,
-              cover_file_id:
-                session.cover_file_id,
-              file_id:
-                document.file_id
-            });
-
-        if (error) {
-          console.error(
-            'Supabase insert error:',
-            error
-          );
-
-          return ctx.reply(
-            '❌ Не удалось сохранить игру в Supabase.'
-          );
-        }
-
-        const game = {
-          id: gameId,
-          name: session.name,
-          description:
-            session.description,
-          category:
-            session.category,
-          cover_file_id:
-            session.cover_file_id,
-          file_id:
-            document.file_id
-        };
-
-        try {
-          await publishGame(game);
-        } catch (publishError) {
-          console.error(
-            'Channel publish error:',
-            publishError
-          );
-        }
-
-        addGameSessions.delete(
+    try {
+      const member =
+        await ctx.telegram.getChatMember(
+          PUBLIC_CHANNEL,
           ctx.from.id
         );
 
-        return ctx.reply(
-          '✅ Игра успешно добавлена!\n\n' +
-            `🎮 ${session.name}\n` +
-            `🆔 ${gameId}\n` +
-            `📂 ${session.category}\n` +
-            '🖼 Обложка сохранена\n\n' +
-            'Игра сохранена в каталоге GameVault-Mobile.\n' +
-            '📢 Пост автоматически опубликован в канале.'
-        );
-      } catch (error) {
-        console.error(error);
+      const subscribed = [
+        'creator',
+        'administrator',
+        'member'
+      ].includes(member.status);
 
+      if (!subscribed) {
         return ctx.reply(
-          '❌ Произошла ошибка при добавлении игры.'
+          '❌ Ты ещё не подписан на канал.\n\n' +
+          'Подпишись и нажми «Проверить подписку».'
         );
       }
+
+      verifiedUsers.add(
+        ctx.from.id
+      );
+
+      await ctx.reply(
+        '✅ Подписка подтверждена!'
+      );
+
+      await sendGame(
+        ctx,
+        game
+      );
+    } catch (error) {
+      console.error(
+        'Subscription check error:',
+        error
+      );
+
+      await ctx.reply(
+        '⚠️ Не удалось проверить подписку.\n\n' +
+        'Попробуй ещё раз через несколько секунд.'
+      );
     }
   }
+);
 
-  await ctx.reply(
-    '📦 FILE_ID:\n\n' +
-      document.file_id
-  );
-});
+// ========================================
+// ADMIN COMMANDS
+// ========================================
 
-// ========================
-// FILE ID
-// ========================
+bot.command(
+  'health',
+  async (ctx) => {
+    if (!isAdmin(ctx)) {
+      return ctx.reply(
+        '❌ Доступ запрещён.'
+      );
+    }
 
-bot.command('fileid', async (ctx) => {
-  await ctx.reply(
-    '📦 Отправь APK следующим сообщением как документ.'
-  );
-});
+    await ctx.reply(
+      '✅ Бот работает.\n' +
+      `👤 ID: ${ctx.from.id}`
+    );
+  }
+);
 
-// ========================
-// КОМАНДЫ
-// ========================
+bot.command(
+  'games',
+  async (ctx) => {
+    try {
+      const { data, error } =
+        await supabase
+          .from('games')
+          .select(
+            'id,name,category,created_at'
+          )
+          .order(
+            'created_at',
+            {
+              ascending: false
+            }
+          );
 
-bot.command('games', (ctx) => {
-  ctx.reply(
-    '🎮 Каталог GameVault-Mobile пока готовится.'
-  );
-});
+      if (error) {
+        console.error(
+          'Games list error:',
+          error
+        );
 
-bot.command('new', (ctx) => {
-  ctx.reply(
-    '🔥 Новинки скоро появятся здесь.'
-  );
-});
+        return ctx.reply(
+          '❌ Ошибка получения списка игр.'
+        );
+      }
 
-bot.help((ctx) => {
-  ctx.reply(
-    '🎮 GameVault-Mobile\n\n' +
-      '/start — запустить бота\n' +
-      '/games — игры\n' +
-      '/new — новинки\n' +
-      '/help — помощь\n' +
-      '/addgame — добавить игру'
-  );
-});
+      if (!data || data.length === 0) {
+        return ctx.reply(
+          '🎮 Игр пока нет.'
+        );
+      }
 
-// ========================
-// ЗАПУСК WEBHOOK
-// ========================
+      const text =
+        '🎮 Игры GameVault-Mobile:\n\n' +
+        data
+          .map(
+            (game) =>
+              `• ${game.name || 'Без названия'}\n` +
+              `  ID: ${game.id}\n` +
+              `  Категория: ${game.category || '—'}`
+          )
+          .join('\n\n');
 
-const server = app.listen(
+      await ctx.reply(text);
+    } catch (error) {
+      console.error(
+        'Games command error:',
+        error
+      );
+
+      await ctx.reply(
+        '❌ Ошибка.'
+      );
+    }
+  }
+);
+
+// ========================================
+// ERROR HANDLER
+// ========================================
+
+bot.catch(
+  (error, ctx) => {
+    console.error(
+      'Telegraf error:',
+      error
+    );
+
+    console.error(
+      'Update:',
+      ctx.update
+    );
+  }
+);
+
+// ========================================
+// START SERVER
+// ========================================
+
+app.listen(
   PORT,
   async () => {
+    console.log(
+      `Server running on port ${PORT}`
+    );
+
     const webhookUrl =
       `${WEBHOOK_URL}${WEBHOOK_PATH}`;
 
     try {
-      const webhookOptions = {
-        secret_token: WEBHOOK_SECRET
-      };
-
       await bot.telegram.setWebhook(
         webhookUrl,
-        webhookOptions
-      );
-
-      const webhookInfo =
-        await bot.telegram.getWebhookInfo();
-
-      console.log(
-        `Server running on port ${PORT}`
+        {
+          secret_token:
+            WEBHOOK_SECRET
+        }
       );
 
       console.log(
-        `Telegram webhook set: ${webhookInfo.url}`
+        `Telegram webhook set: ${webhookUrl}`
       );
 
       console.log(
@@ -653,27 +515,9 @@ const server = app.listen(
       );
     } catch (error) {
       console.error(
-        'Telegram webhook setup error:',
+        'Failed to set Telegram webhook:',
         error
       );
     }
-  }
-);
-
-process.once(
-  'SIGINT',
-  () => {
-    server.close(
-      () => bot.stop('SIGINT')
-    );
-  }
-);
-
-process.once(
-  'SIGTERM',
-  () => {
-    server.close(
-      () => bot.stop('SIGTERM')
-    );
   }
 );
