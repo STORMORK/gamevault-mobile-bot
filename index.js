@@ -42,37 +42,51 @@ if (!WEBHOOK_SECRET) {
 app.use(express.json());
 
 // ========================================
-// WEBHOOK SECURITY
+// WEBHOOK
 // ========================================
 
-app.use((req, res, next) => {
-  if (req.path !== WEBHOOK_PATH) {
-    return next();
-  }
+app.post(
+  WEBHOOK_PATH,
+  async (req, res) => {
+    const receivedSecret =
+      req.headers[
+        'x-telegram-bot-api-secret-token'
+      ];
 
-  const receivedSecret =
-    req.headers['x-telegram-bot-api-secret-token'];
+    if (receivedSecret !== WEBHOOK_SECRET) {
+      console.warn(
+        'Blocked unauthorized webhook request.'
+      );
 
-  if (receivedSecret !== WEBHOOK_SECRET) {
-    console.warn(
-      'Blocked unauthorized webhook request.'
+      return res.sendStatus(403);
+    }
+
+    console.log(
+      'Telegram webhook request received.'
     );
 
-    return res.sendStatus(403);
+    console.log(
+      'Telegram update:',
+      JSON.stringify(req.body)
+    );
+
+    try {
+      await bot.handleUpdate(req.body);
+
+      console.log(
+        'Telegram update processed successfully.'
+      );
+
+      return res.sendStatus(200);
+    } catch (error) {
+      console.error(
+        'Telegram update processing error:',
+        error
+      );
+
+      return res.sendStatus(500);
+    }
   }
-
-  console.log('Telegram webhook request received.');
-
-  next();
-});
-
-// ========================================
-// TELEGRAM WEBHOOK
-// ========================================
-
-app.use(
-  WEBHOOK_PATH,
-  bot.webhookCallback(WEBHOOK_PATH)
 );
 
 // ========================================
@@ -80,7 +94,9 @@ app.use(
 // ========================================
 
 app.get('/', (req, res) => {
-  res.send('GameVault-Mobile bot is running!');
+  res.send(
+    'GameVault-Mobile bot is running!'
+  );
 });
 
 app.get('/health', (req, res) => {
@@ -176,7 +192,9 @@ async function getNextGameId() {
 
 async function sendGame(ctx, game) {
   if (!game) {
-    return ctx.reply('❌ Игра не найдена.');
+    return ctx.reply(
+      '❌ Игра не найдена.'
+    );
   }
 
   if (!game.file_id) {
@@ -217,7 +235,10 @@ async function sendGame(ctx, game) {
 // SUBSCRIPTION
 // ========================================
 
-async function showSubscription(ctx, gameId) {
+async function showSubscription(
+  ctx,
+  gameId
+) {
   await ctx.reply(
     '📢 Чтобы скачать игру, сначала подпишись на наш Telegram-канал.\n\n' +
     'После подписки нажми «Проверить подписку».',
@@ -227,13 +248,16 @@ async function showSubscription(ctx, gameId) {
           [
             {
               text: '📢 Подписаться',
-              url: 'https://t.me/gamevaultmobile'
+              url:
+                'https://t.me/gamevaultmobile'
             }
           ],
           [
             {
-              text: '✅ Проверить подписку',
-              callback_data: `check:${gameId}`
+              text:
+                '✅ Проверить подписку',
+              callback_data:
+                `check:${gameId}`
             }
           ]
         ]
@@ -248,13 +272,17 @@ async function showSubscription(ctx, gameId) {
 
 bot.start(async (ctx) => {
   console.log(
-    `Received /start from ${ctx.from.id}`
+    'START HANDLER:',
+    ctx.from?.id,
+    ctx.from?.username || ''
   );
 
-  const gameId = ctx.startPayload;
+  const gameId =
+    ctx.startPayload;
 
   if (gameId) {
-    const game = await getGame(gameId);
+    const game =
+      await getGame(gameId);
 
     if (!game) {
       return ctx.reply(
@@ -262,8 +290,15 @@ bot.start(async (ctx) => {
       );
     }
 
-    if (verifiedUsers.has(ctx.from.id)) {
-      return sendGame(ctx, game);
+    if (
+      verifiedUsers.has(
+        ctx.from.id
+      )
+    ) {
+      return sendGame(
+        ctx,
+        game
+      );
     }
 
     return showSubscription(
@@ -281,13 +316,19 @@ bot.start(async (ctx) => {
         inline_keyboard: [
           [
             {
-              text: '🎮 Получить тестовую игру',
-              callback_data: 'get_game'
+              text:
+                '🎮 Получить тестовую игру',
+              callback_data:
+                'get_game'
             }
           ]
         ]
       }
     }
+  );
+
+  console.log(
+    'START RESPONSE SENT.'
   );
 });
 
@@ -300,9 +341,11 @@ bot.action(
   async (ctx) => {
     await ctx.answerCbQuery();
 
-    const gameId = 'game_001';
+    const gameId =
+      'game_001';
 
-    const game = await getGame(gameId);
+    const game =
+      await getGame(gameId);
 
     if (!game) {
       return ctx.reply(
@@ -310,8 +353,15 @@ bot.action(
       );
     }
 
-    if (verifiedUsers.has(ctx.from.id)) {
-      return sendGame(ctx, game);
+    if (
+      verifiedUsers.has(
+        ctx.from.id
+      )
+    ) {
+      return sendGame(
+        ctx,
+        game
+      );
     }
 
     return showSubscription(
@@ -330,9 +380,11 @@ bot.action(
   async (ctx) => {
     await ctx.answerCbQuery();
 
-    const gameId = ctx.match[1];
+    const gameId =
+      ctx.match[1];
 
-    const game = await getGame(gameId);
+    const game =
+      await getGame(gameId);
 
     if (!game) {
       return ctx.reply(
@@ -351,7 +403,9 @@ bot.action(
         'creator',
         'administrator',
         'member'
-      ].includes(member.status);
+      ].includes(
+        member.status
+      );
 
       if (!subscribed) {
         return ctx.reply(
@@ -387,7 +441,7 @@ bot.action(
 );
 
 // ========================================
-// ADMIN COMMANDS
+// ADMIN HEALTH
 // ========================================
 
 bot.command(
@@ -406,22 +460,28 @@ bot.command(
   }
 );
 
+// ========================================
+// GAMES
+// ========================================
+
 bot.command(
   'games',
   async (ctx) => {
     try {
-      const { data, error } =
-        await supabase
-          .from('games')
-          .select(
-            'id,name,category,created_at'
-          )
-          .order(
-            'created_at',
-            {
-              ascending: false
-            }
-          );
+      const {
+        data,
+        error
+      } = await supabase
+        .from('games')
+        .select(
+          'id,name,category,created_at'
+        )
+        .order(
+          'created_at',
+          {
+            ascending: false
+          }
+        );
 
       if (error) {
         console.error(
@@ -434,7 +494,10 @@ bot.command(
         );
       }
 
-      if (!data || data.length === 0) {
+      if (
+        !data ||
+        data.length === 0
+      ) {
         return ctx.reply(
           '🎮 Игр пока нет.'
         );
@@ -466,19 +529,21 @@ bot.command(
 );
 
 // ========================================
-// ERROR HANDLER
+// GLOBAL ERROR HANDLER
 // ========================================
 
 bot.catch(
   (error, ctx) => {
     console.error(
-      'Telegraf error:',
+      'TELEGRAF ERROR:',
       error
     );
 
     console.error(
-      'Update:',
-      ctx.update
+      'UPDATE:',
+      JSON.stringify(
+        ctx?.update
+      )
     );
   }
 );
