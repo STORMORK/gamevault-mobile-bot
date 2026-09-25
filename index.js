@@ -13,11 +13,36 @@ const app = express();
 const PUBLIC_CHANNEL = '@gamevaultmobile';
 const ADMIN_ID = 1047945172;
 
+// ========================
+// WEBHOOK
+// ========================
+
+const PORT = process.env.PORT || 3000;
+const WEBHOOK_PATH = '/telegram-webhook';
+const WEBHOOK_URL =
+  process.env.WEBHOOK_URL ||
+  process.env.RENDER_EXTERNAL_URL;
+
+if (!WEBHOOK_URL) {
+  throw new Error(
+    'WEBHOOK_URL or RENDER_EXTERNAL_URL is required for webhook mode.'
+  );
+}
+
+app.use(bot.webhookCallback(WEBHOOK_PATH));
+
+// ========================
+// ADMIN
+// ========================
+
 function isAdmin(ctx) {
   return ctx.from && ctx.from.id === ADMIN_ID;
 }
 
-// Сессии добавления игр
+// ========================
+// СЕССИИ ДОБАВЛЕНИЯ ИГР
+// ========================
+
 const addGameSessions = new Map();
 
 // ========================
@@ -86,12 +111,6 @@ app.get('/', (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
 
 // ========================
@@ -238,7 +257,10 @@ async function sendGame(ctx, game) {
       'Вот твоя игра 👇'
   );
 
-  await ctx.telegram.sendDocument(ctx.chat.id, game.file_id);
+  await ctx.telegram.sendDocument(
+    ctx.chat.id,
+    game.file_id
+  );
 }
 
 // ========================
@@ -265,7 +287,6 @@ async function publishGame(game) {
     }
   };
 
-  // Если есть обложка — публикуем её вместе с текстом
   if (game.cover_file_id) {
     await bot.telegram.sendPhoto(
       PUBLIC_CHANNEL,
@@ -276,7 +297,6 @@ async function publishGame(game) {
       }
     );
   } else {
-    // Старые игры без обложки продолжают публиковаться как раньше
     await bot.telegram.sendMessage(
       PUBLIC_CHANNEL,
       text,
@@ -300,7 +320,9 @@ bot.command('post', async (ctx) => {
   try {
     await publishGame(game);
 
-    await ctx.reply('✅ Пост опубликован в канале.');
+    await ctx.reply(
+      '✅ Пост опубликован в канале.'
+    );
   } catch (error) {
     console.error(error);
 
@@ -317,7 +339,9 @@ bot.command('post', async (ctx) => {
 
 bot.command('addgame', async (ctx) => {
   if (!isAdmin(ctx)) {
-    return ctx.reply('⛔ У тебя нет доступа к этой команде.');
+    return ctx.reply(
+      '⛔ У тебя нет доступа к этой команде.'
+    );
   }
 
   addGameSessions.set(ctx.from.id, {
@@ -339,12 +363,16 @@ bot.on('text', async (ctx) => {
 
   if (ctx.message.text.startsWith('/')) return;
 
-  const session = addGameSessions.get(ctx.from.id);
+  const session = addGameSessions.get(
+    ctx.from.id
+  );
 
   if (!session) return;
 
   if (session.step === 'name') {
-    session.name = ctx.message.text.trim();
+    session.name =
+      ctx.message.text.trim();
+
     session.step = 'description';
 
     return ctx.reply(
@@ -353,7 +381,9 @@ bot.on('text', async (ctx) => {
   }
 
   if (session.step === 'description') {
-    session.description = ctx.message.text.trim();
+    session.description =
+      ctx.message.text.trim();
+
     session.step = 'category';
 
     return ctx.reply(
@@ -362,7 +392,9 @@ bot.on('text', async (ctx) => {
   }
 
   if (session.step === 'category') {
-    session.category = ctx.message.text.trim();
+    session.category =
+      ctx.message.text.trim();
+
     session.step = 'cover';
 
     return ctx.reply(
@@ -378,16 +410,25 @@ bot.on('text', async (ctx) => {
 bot.on('photo', async (ctx) => {
   if (!isAdmin(ctx)) return;
 
-  const session = addGameSessions.get(ctx.from.id);
+  const session = addGameSessions.get(
+    ctx.from.id
+  );
 
-  if (!session || session.step !== 'cover') return;
+  if (
+    !session ||
+    session.step !== 'cover'
+  ) {
+    return;
+  }
 
   const photos = ctx.message.photo;
 
-  // Берём самое большое доступное изображение
-  const cover = photos[photos.length - 1];
+  const cover =
+    photos[photos.length - 1];
 
-  session.cover_file_id = cover.file_id;
+  session.cover_file_id =
+    cover.file_id;
+
   session.step = 'file';
 
   await ctx.reply(
@@ -401,15 +442,20 @@ bot.on('photo', async (ctx) => {
 // ========================
 
 bot.on('document', async (ctx) => {
-  const document = ctx.message.document;
+  const document =
+    ctx.message.document;
 
-  // Если админ сейчас добавляет игру
   if (isAdmin(ctx)) {
-    const session = addGameSessions.get(ctx.from.id);
+    const session =
+      addGameSessions.get(ctx.from.id);
 
-    if (session && session.step === 'file') {
+    if (
+      session &&
+      session.step === 'file'
+    ) {
       try {
-        const gameId = await getNextGameId();
+        const gameId =
+          await getNextGameId();
 
         if (!gameId) {
           return ctx.reply(
@@ -417,19 +463,27 @@ bot.on('document', async (ctx) => {
           );
         }
 
-        const { error } = await supabase
-          .from('games')
-          .insert({
-            id: gameId,
-            name: session.name,
-            description: session.description,
-            category: session.category,
-            cover_file_id: session.cover_file_id,
-            file_id: document.file_id
-          });
+        const { error } =
+          await supabase
+            .from('games')
+            .insert({
+              id: gameId,
+              name: session.name,
+              description:
+                session.description,
+              category:
+                session.category,
+              cover_file_id:
+                session.cover_file_id,
+              file_id:
+                document.file_id
+            });
 
         if (error) {
-          console.error('Supabase insert error:', error);
+          console.error(
+            'Supabase insert error:',
+            error
+          );
 
           return ctx.reply(
             '❌ Не удалось сохранить игру в Supabase.'
@@ -439,13 +493,16 @@ bot.on('document', async (ctx) => {
         const game = {
           id: gameId,
           name: session.name,
-          description: session.description,
-          category: session.category,
-          cover_file_id: session.cover_file_id,
-          file_id: document.file_id
+          description:
+            session.description,
+          category:
+            session.category,
+          cover_file_id:
+            session.cover_file_id,
+          file_id:
+            document.file_id
         };
 
-        // Автоматически публикуем игру в канале
         try {
           await publishGame(game);
         } catch (publishError) {
@@ -455,7 +512,9 @@ bot.on('document', async (ctx) => {
           );
         }
 
-        addGameSessions.delete(ctx.from.id);
+        addGameSessions.delete(
+          ctx.from.id
+        );
 
         return ctx.reply(
           '✅ Игра успешно добавлена!\n\n' +
@@ -476,7 +535,6 @@ bot.on('document', async (ctx) => {
     }
   }
 
-  // Обычная команда получения FILE_ID
   await ctx.reply(
     '📦 FILE_ID:\n\n' +
       document.file_id
@@ -521,10 +579,63 @@ bot.help((ctx) => {
 });
 
 // ========================
-// ЗАПУСК
+// ЗАПУСК WEBHOOK
 // ========================
 
-bot.launch();
+const server = app.listen(
+  PORT,
+  async () => {
+    const webhookUrl =
+      `${WEBHOOK_URL}${WEBHOOK_PATH}`;
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    try {
+      const webhookOptions = {};
+
+      if (
+        process.env.TELEGRAM_WEBHOOK_SECRET
+      ) {
+        webhookOptions.secret_token =
+          process.env.TELEGRAM_WEBHOOK_SECRET;
+      }
+
+      await bot.telegram.setWebhook(
+        webhookUrl,
+        webhookOptions
+      );
+
+      const webhookInfo =
+        await bot.telegram.getWebhookInfo();
+
+      console.log(
+        `Server running on port ${PORT}`
+      );
+
+      console.log(
+        `Telegram webhook set: ${webhookInfo.url}`
+      );
+    } catch (error) {
+      console.error(
+        'Telegram webhook setup error:',
+        error
+      );
+    }
+  }
+);
+
+process.once(
+  'SIGINT',
+  () => {
+    server.close(
+      () => bot.stop('SIGINT')
+    );
+  }
+);
+
+process.once(
+  'SIGTERM',
+  () => {
+    server.close(
+      () => bot.stop('SIGTERM')
+    );
+  }
+);
