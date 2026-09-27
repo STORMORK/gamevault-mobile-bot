@@ -475,10 +475,20 @@ bot.command(
 // ADD GAME
 // ========================================
 
-bot.command(
-  'addgame',
+bot.hears(
+  /^\/addgame(?:@\w+)?$/i,
   async (ctx) => {
+    console.log(
+      'ADDGAME HANDLER:',
+      ctx.from?.id,
+      ctx.from?.username || ''
+    );
+
     if (!isAdmin(ctx)) {
+      console.log(
+        'ADDGAME: ACCESS DENIED'
+      );
+
       return ctx.reply(
         '❌ Доступ запрещён.'
       );
@@ -491,10 +501,18 @@ bot.command(
       }
     );
 
+    console.log(
+      'ADDGAME SESSION CREATED'
+    );
+
     await ctx.reply(
       '🎮 Добавление игры\n\n' +
       'Шаг 1/4\n' +
       '📦 Отправь APK-файл игры сюда как документ.'
+    );
+
+    console.log(
+      'ADDGAME RESPONSE SENT'
     );
   }
 );
