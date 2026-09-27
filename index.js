@@ -472,23 +472,18 @@ bot.command(
 );
 
 // ========================================
-// ADD GAME
+// ADD GAME — START
 // ========================================
 
 bot.hears(
   /^\/addgame(?:@\w+)?$/i,
   async (ctx) => {
     console.log(
-      'ADDGAME HANDLER:',
-      ctx.from?.id,
-      ctx.from?.username || ''
+      'ADDGAME START:',
+      ctx.from?.id
     );
 
     if (!isAdmin(ctx)) {
-      console.log(
-        'ADDGAME: ACCESS DENIED'
-      );
-
       return ctx.reply(
         '❌ Доступ запрещён.'
       );
@@ -497,28 +492,69 @@ bot.hears(
     addGameSessions.set(
       ctx.from.id,
       {
-        step: 'file'
+        step: 'name'
       }
-    );
-
-    console.log(
-      'ADDGAME SESSION CREATED'
     );
 
     await ctx.reply(
       '🎮 Добавление игры\n\n' +
-      'Шаг 1/4\n' +
-      '📦 Отправь APK-файл игры сюда как документ.'
-    );
-
-    console.log(
-      'ADDGAME RESPONSE SENT'
+      'Шаг 1/5\n' +
+      '✏️ Напиши название игры.'
     );
   }
 );
 
 // ========================================
-// ADD GAME — DOCUMENT
+// ADD GAME — IMAGE
+// ========================================
+
+bot.on(
+  'photo',
+  async (ctx) => {
+    if (!isAdmin(ctx)) {
+      return;
+    }
+
+    const session =
+      addGameSessions.get(
+        ctx.from.id
+      );
+
+    if (
+      !session ||
+      session.step !== 'image'
+    ) {
+      return;
+    }
+
+    const photos =
+      ctx.message.photo;
+
+    const image =
+      photos[photos.length - 1];
+
+    session.image_file_id =
+      image.file_id;
+
+    session.step =
+      'description';
+
+    addGameSessions.set(
+      ctx.from.id,
+      session
+    );
+
+    await ctx.reply(
+      '✅ Изображение получено.\n\n' +
+      'Шаг 3/5\n' +
+      '📝 Напиши описание игры.\n\n' +
+      'Если описание не нужно, напиши: -'
+    );
+  }
+);
+
+// ========================================
+// ADD GAME — APK
 // ========================================
 
 bot.on(
@@ -552,19 +588,111 @@ bot.on(
     session.file_size =
       document.file_size || null;
 
-    session.step =
-      'name';
+    try {
+      const gameId =
+        await getNextGameId();
 
-    addGameSessions.set(
-      ctx.from.id,
-      session
-    );
+      if (!gameId) {
+        addGameSessions.delete(
+          ctx.from.id
+        );
 
-    await ctx.reply(
-      '✅ APK получен.\n\n' +
-      'Шаг 2/4\n' +
-      '✏️ Напиши название игры.'
-    );
+        return ctx.reply(
+          '❌ Не удалось создать ID игры.'
+        );
+      }
+
+      // ========================================
+      // SAVE GAME
+      // ========================================
+
+      const {
+        data,
+        error
+      } = await supabase
+        .from('games')
+        .insert({
+          id: gameId,
+          name: session.name,
+          description:
+            session.description,
+          file_id:
+            session.file_id,
+          category:
+            session.category
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error(
+          'Add game Supabase error:',
+          error
+        );
+
+        return ctx.reply(
+          '❌ Не удалось сохранить игру в Supabase.\n\n' +
+          error.message
+        );
+      }
+
+      // ========================================
+      // PUBLISH TO CHANNEL
+      // ========================================
+
+      const caption =
+        `🎮 ${data.name}\n\n` +
+        `${data.description || ''}\n\n` +
+        `🏷 Жанр: ${data.category || '—'}`;
+
+      await ctx.telegram.sendPhoto(
+        PUBLIC_CHANNEL,
+        session.image_file_id,
+        {
+          caption,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text:
+                    '🎮 Скачать игру',
+                  url:
+                    `https://t.me/GameVaultMobileBot?start=${data.id}`
+                }
+              ]
+            ]
+          }
+        }
+      );
+
+      // ========================================
+      // FINISH
+      // ========================================
+
+      addGameSessions.delete(
+        ctx.from.id
+      );
+
+      await ctx.reply(
+        '✅ Игра успешно добавлена!\n\n' +
+        `🎮 ${data.name}\n` +
+        `🆔 ${data.id}\n` +
+        `🏷 ${data.category || '—'}\n\n` +
+        '📢 Пост автоматически опубликован в канале.\n\n' +
+        `🔗 https://t.me/GameVaultMobileBot?start=${data.id}`
+      );
+
+    } catch (error) {
+      console.error(
+        'Add game error:',
+        error
+      );
+
+      await ctx.reply(
+        '❌ Произошла ошибка при добавлении игры.\n\n' +
+        error.message
+      );
+    }
   }
 );
 
@@ -597,13 +725,18 @@ bot.on(
       return;
     }
 
+    // ========================================
     // NAME
+    // ========================================
+
     if (
       session.step === 'name'
     ) {
-      session.name = text;
+      session.name =
+        text;
+
       session.step =
-        'description';
+        'image';
 
       addGameSessions.set(
         ctx.from.id,
@@ -611,13 +744,15 @@ bot.on(
       );
 
       return ctx.reply(
-        'Шаг 3/4\n' +
-        '📝 Напиши описание игры.\n\n' +
-        'Если описание не нужно, напиши: -'
+        'Шаг 2/5\n' +
+        '🖼 Пришли изображение игры.'
       );
     }
 
+    // ========================================
     // DESCRIPTION
+    // ========================================
+
     if (
       session.step === 'description'
     ) {
@@ -635,13 +770,16 @@ bot.on(
       );
 
       return ctx.reply(
-        'Шаг 4/4\n' +
-        '🏷 Напиши категорию игры.\n\n' +
+        'Шаг 4/5\n' +
+        '🏷 Напиши жанр игры.\n\n' +
         'Например: Action, RPG, Adventure'
       );
     }
 
+    // ========================================
     // CATEGORY
+    // ========================================
+
     if (
       session.step === 'category'
     ) {
@@ -650,71 +788,18 @@ bot.on(
           ? ''
           : text;
 
-      try {
-        const gameId =
-          await getNextGameId();
+      session.step =
+        'file';
 
-        if (!gameId) {
-          addGameSessions.delete(
-            ctx.from.id
-          );
+      addGameSessions.set(
+        ctx.from.id,
+        session
+      );
 
-          return ctx.reply(
-            '❌ Не удалось создать ID игры.'
-          );
-        }
-
-        const {
-          data,
-          error
-        } = await supabase
-          .from('games')
-          .insert({
-            id: gameId,
-            name: session.name,
-            description:
-              session.description,
-            file_id:
-              session.file_id,
-            category:
-              session.category
-          })
-          .select()
-          .single();
-
-        if (error) {
-          console.error(
-            'Add game Supabase error:',
-            error
-          );
-
-          return ctx.reply(
-            '❌ Не удалось сохранить игру в Supabase.\n\n' +
-            error.message
-          );
-        }
-
-        addGameSessions.delete(
-          ctx.from.id
-        );
-
-        await ctx.reply(
-          '✅ Игра успешно добавлена!\n\n' +
-          `🎮 ${data.name}\n` +
-          `🆔 ${data.id}\n` +
-          `🏷 ${data.category || '—'}\n\n` +
-          `🔗 https://t.me/GameVaultMobileBot?start=${data.id}`
-        );
-      } catch (error) {
-        console.error(
-          'Add game error:',
-          error
-        );
-
-        await ctx.reply(
-          '❌ Произошла ошибка при добавлении игры.'
-        );
-      }
+      return ctx.reply(
+        'Шаг 5/5\n' +
+        '📦 Теперь отправь APK-файл игры сюда как документ.'
+      );
     }
   }
 );
