@@ -111,7 +111,8 @@ app.get('/health', (req, res) => {
 // ========================================
 
 function isAdmin(ctx) {
-  return ctx.from && ctx.from.id === ADMIN_ID;
+  return ctx.from &&
+    ctx.from.id === ADMIN_ID;
 }
 
 // ========================================
@@ -131,7 +132,10 @@ const addGameSessions = new Map();
 // ========================================
 
 async function getGame(gameId) {
-  const { data, error } = await supabase
+  const {
+    data,
+    error
+  } = await supabase
     .from('games')
     .select('*')
     .eq('id', gameId)
@@ -154,7 +158,10 @@ async function getGame(gameId) {
 // ========================================
 
 async function getNextGameId() {
-  const { data, error } = await supabase
+  const {
+    data,
+    error
+  } = await supabase
     .from('games')
     .select('id');
 
@@ -170,12 +177,14 @@ async function getNextGameId() {
   let maxNumber = 0;
 
   for (const game of data || []) {
-    const match = String(game.id).match(
-      /^game_(\d+)$/
-    );
+    const match =
+      String(game.id).match(
+        /^game_(\d+)$/
+      );
 
     if (match) {
-      const number = Number(match[1]);
+      const number =
+        Number(match[1]);
 
       if (number > maxNumber) {
         maxNumber = number;
@@ -183,7 +192,9 @@ async function getNextGameId() {
     }
   }
 
-  return `game_${String(maxNumber + 1).padStart(3, '0')}`;
+  return `game_${String(
+    maxNumber + 1
+  ).padStart(3, '0')}`;
 }
 
 // ========================================
@@ -457,6 +468,236 @@ bot.command(
       '✅ Бот работает.\n' +
       `👤 ID: ${ctx.from.id}`
     );
+  }
+);
+
+// ========================================
+// ADD GAME
+// ========================================
+
+bot.command(
+  'addgame',
+  async (ctx) => {
+    if (!isAdmin(ctx)) {
+      return ctx.reply(
+        '❌ Доступ запрещён.'
+      );
+    }
+
+    addGameSessions.set(
+      ctx.from.id,
+      {
+        step: 'file'
+      }
+    );
+
+    await ctx.reply(
+      '🎮 Добавление игры\n\n' +
+      'Шаг 1/4\n' +
+      '📦 Отправь APK-файл игры сюда как документ.'
+    );
+  }
+);
+
+// ========================================
+// ADD GAME — DOCUMENT
+// ========================================
+
+bot.on(
+  'document',
+  async (ctx) => {
+    if (!isAdmin(ctx)) {
+      return;
+    }
+
+    const session =
+      addGameSessions.get(
+        ctx.from.id
+      );
+
+    if (
+      !session ||
+      session.step !== 'file'
+    ) {
+      return;
+    }
+
+    const document =
+      ctx.message.document;
+
+    session.file_id =
+      document.file_id;
+
+    session.file_name =
+      document.file_name || '';
+
+    session.file_size =
+      document.file_size || null;
+
+    session.step =
+      'name';
+
+    addGameSessions.set(
+      ctx.from.id,
+      session
+    );
+
+    await ctx.reply(
+      '✅ APK получен.\n\n' +
+      'Шаг 2/4\n' +
+      '✏️ Напиши название игры.'
+    );
+  }
+);
+
+// ========================================
+// ADD GAME — TEXT STEPS
+// ========================================
+
+bot.on(
+  'text',
+  async (ctx) => {
+    if (!isAdmin(ctx)) {
+      return;
+    }
+
+    const session =
+      addGameSessions.get(
+        ctx.from.id
+      );
+
+    if (!session) {
+      return;
+    }
+
+    const text =
+      ctx.message.text.trim();
+
+    if (
+      text.startsWith('/')
+    ) {
+      return;
+    }
+
+    // NAME
+    if (
+      session.step === 'name'
+    ) {
+      session.name = text;
+      session.step =
+        'description';
+
+      addGameSessions.set(
+        ctx.from.id,
+        session
+      );
+
+      return ctx.reply(
+        'Шаг 3/4\n' +
+        '📝 Напиши описание игры.\n\n' +
+        'Если описание не нужно, напиши: -'
+      );
+    }
+
+    // DESCRIPTION
+    if (
+      session.step === 'description'
+    ) {
+      session.description =
+        text === '-'
+          ? ''
+          : text;
+
+      session.step =
+        'category';
+
+      addGameSessions.set(
+        ctx.from.id,
+        session
+      );
+
+      return ctx.reply(
+        'Шаг 4/4\n' +
+        '🏷 Напиши категорию игры.\n\n' +
+        'Например: Action, RPG, Adventure'
+      );
+    }
+
+    // CATEGORY
+    if (
+      session.step === 'category'
+    ) {
+      session.category =
+        text === '-'
+          ? ''
+          : text;
+
+      try {
+        const gameId =
+          await getNextGameId();
+
+        if (!gameId) {
+          addGameSessions.delete(
+            ctx.from.id
+          );
+
+          return ctx.reply(
+            '❌ Не удалось создать ID игры.'
+          );
+        }
+
+        const {
+          data,
+          error
+        } = await supabase
+          .from('games')
+          .insert({
+            id: gameId,
+            name: session.name,
+            description:
+              session.description,
+            file_id:
+              session.file_id,
+            category:
+              session.category
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error(
+            'Add game Supabase error:',
+            error
+          );
+
+          return ctx.reply(
+            '❌ Не удалось сохранить игру в Supabase.\n\n' +
+            error.message
+          );
+        }
+
+        addGameSessions.delete(
+          ctx.from.id
+        );
+
+        await ctx.reply(
+          '✅ Игра успешно добавлена!\n\n' +
+          `🎮 ${data.name}\n` +
+          `🆔 ${data.id}\n` +
+          `🏷 ${data.category || '—'}\n\n` +
+          `🔗 https://t.me/GameVaultMobileBot?start=${data.id}`
+        );
+      } catch (error) {
+        console.error(
+          'Add game error:',
+          error
+        );
+
+        await ctx.reply(
+          '❌ Произошла ошибка при добавлении игры.'
+        );
+      }
+    }
   }
 );
 
